@@ -4,15 +4,34 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "typecheck": "tsc",
-    "wasm": "javy compile build/index.js -o build/index.wasm",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "npm run asbuild",
+    "run": "wasmtime build/index.wasm",
+    "start": "zellij -s plugin-dev --layout ./test-layout.kdl",
+    "stop": "zellij delete-session --force plugin-dev",
+    "test": "node tests",
+    "asbuild:debug": "asc assembly/index.ts --target debug",
+    "asbuild:release": "asc assembly/index.ts --target release",
+    "asbuild": "npm run asbuild:debug && npm run asbuild:release",
+    "clean": "rm -r ./build"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "javy-cli": "^0.2.0",
+    "@assemblyscript/wasi-shim": "^0.1.0",
+    "@cataggar/wasmtime-cli-macos": "^13.0.0",
+    "assemblyscript": "^0.27.23",
     "typescript": "^5.3.3"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./build/release.js",
+      "types": "./build/release.d.ts"
+    }
+  },
+  "dependencies": {
+    "as-wasi": "^0.6.0",
+    "json-as": "^0.7.2"
   }
 }
