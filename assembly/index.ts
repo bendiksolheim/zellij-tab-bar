@@ -1,30 +1,65 @@
-// The entry file of your WebAssembly module.
-
-import { Console } from "as-wasi/assembly";
+import { debug, write } from "./log";
 import { ZellijPlugin, registerPlugin } from "./zellij-plugin";
-import { subscribe } from "./shim";
-import { CommandName } from "./plugin-command";
 export { load, render, update, plugin_version } from "./zellij-plugin";
-import { EventType } from "./event";
+import { command, plugin_permission } from "./proto/plugin_command";
+import { event } from "./proto/event";
+import { requestPermission, subscribe } from "./shim";
+import { JSON } from "json-as/assembly";
 
 export function add(a: i32, b: i32): i32 {
   return a + b;
 }
 
 class StatusBar implements ZellijPlugin {
+  sessionName: string | null = null;
+  tabInfo: event.TabInfo[] = [];
+
   load(configuration: Map<string, string>): void {
-    Console.error("load");
-    subscribe([EventType.TabUpdate]);
+    requestPermission([plugin_permission.PermissionType.ReadApplicationState]);
+    subscribe([event.EventType.TabUpdate]);
   }
 
-  update(): bool {
-    Console.error("update");
-    return false;
+  update(ev: event.Event): bool {
+    debug(`Event: ${ev.name}`);
+    switch (ev.name) {
+      case event.EventType.TabUpdate:
+        this.tabInfo = ev.tab_update_payload!.tab_info;
+        return true;
+      case event.EventType.ModeUpdate:
+        debug(
+          ifNotNull<event.ModeUpdatePayload, string>(
+            ev.mode_update_payload,
+            (v) => v.session_name,
+          ) || "",
+        );
+        this.sessionName = ifNotNull<event.ModeUpdatePayload, string>(
+          ev.mode_update_payload,
+          (v) => v.session_name,
+        );
+        return true;
+      default:
+        return false;
+    }
   }
 
   render(rows: i32, cols: i32): void {
-    Console.error(`rows: ${rows}, cols: ${cols}`);
-    Console.write("Hello", false);
+    let output: string =
+      (this.sessionName || "") +
+      " " +
+      this.tabInfo
+        .map((tab: event.TabInfo): string => {
+          return `${tab.position} ${tab.name}`;
+        })
+        .join(" ");
+    write(output);
+  }
+}
+
+function ifNotNull<T, U>(value: T | null, fn: (v: T) => U): U | null {
+  if (value !== null) {
+    return fn(value);
+  } else {
+    return null;
   }
 }
 

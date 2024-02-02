@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run asbuild",
     "run": "wasmtime build/index.wasm",
-    "start": "zellij -s plugin-dev --layout ./test-layout.kdl",
+    "start": "zellij --debug -s plugin-dev --layout ./test-layout.kdl",
     "stop": "zellij delete-session --force plugin-dev",
     "test": "node tests",
     "asbuild:debug": "asc assembly/index.ts --target debug",
@@ -19,9 +19,10 @@
   "license": "ISC",
   "devDependencies": {
     "@assemblyscript/wasi-shim": "^0.1.0",
-    "@cataggar/wasmtime-cli-macos": "^13.0.0",
     "assemblyscript": "^0.27.23",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "visitor-as": "^0.11.4",
+    "prettier": "^3.2.4"
   },
   "type": "module",
   "exports": {
@@ -32,6 +33,10 @@
   },
   "dependencies": {
     "as-wasi": "^0.6.0",
-    "json-as": "^0.7.2"
+    "json-as": "^0.7.2",
+    "protobuf-as": "github:gravitational/protobuf-as"
+  },
+  "overrides": {
+    "assemblyscript": "$assemblyscript"
   }
 }
