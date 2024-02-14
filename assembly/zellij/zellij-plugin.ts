@@ -1,5 +1,5 @@
 import { JSON } from "json-as/assembly";
-import { debug, readLine } from "./log";
+import { debug, readLine } from "../log";
 import { Event } from "./proto/event";
 import { NameAndValue, PluginConfiguration } from "./proto/action";
 

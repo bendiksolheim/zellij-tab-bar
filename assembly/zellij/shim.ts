@@ -1,5 +1,5 @@
 import { hostRunPluginCommand } from "./zellij";
-import { write } from "./log";
+import { write } from "../log";
 import { JSON } from "json-as/assembly";
 import { EventType } from "./proto/event";
 import { CommandName, PluginCommand } from "./proto/plugin_command";
