@@ -1,11 +1,12 @@
 import { debug, write } from "./log";
 import { ZellijPlugin, registerPlugin } from "./zellij-plugin";
 export { load, render, update, plugin_version } from "./zellij-plugin";
-import { command, plugin_permission } from "./proto/plugin_command";
-import { event, input_mode } from "./proto/event";
 import { requestPermission, subscribe } from "./shim";
 import { colors, hexBackground, hexForeground } from "./terminal/color";
 import { Match, RegExp } from "./regexp";
+import { InputMode } from "./proto/input_mode";
+import { Event, EventType, TabInfo } from "./proto/event";
+import { PermissionType } from "./proto/plugin_permission";
 
 class Tab {
   number: u32;
@@ -23,7 +24,7 @@ class Configuration {
   // Info from Zellij
   tabs: Tab[];
   sessionName: string;
-  mode: input_mode.InputMode = 0;
+  mode: InputMode = 0;
 
   // Config from layout
   left: string = "";
@@ -50,22 +51,22 @@ class StatusBar implements ZellijPlugin {
 
   load(configuration: Map<string, string>): void {
     this.config = new Configuration(configuration);
-    requestPermission([plugin_permission.PermissionType.ReadApplicationState]);
-    subscribe([event.EventType.ModeUpdate, event.EventType.TabUpdate]);
+    requestPermission([PermissionType.ReadApplicationState]);
+    subscribe([EventType.ModeUpdate, EventType.TabUpdate]);
   }
 
-  update(ev: event.Event): bool {
+  update(ev: Event): bool {
     debug(`Event: ${ev.name}`);
     switch (ev.name) {
-      case event.EventType.TabUpdate:
+      case EventType.TabUpdate:
         if (ev.tab_update_payload !== null) {
           this.config.tabs = ev.tab_update_payload!.tab_info.map(
-            (tab: event.TabInfo): Tab =>
+            (tab: TabInfo): Tab =>
               new Tab(tab.position + 1, tab.name, tab.active),
           );
         }
         return true;
-      case event.EventType.ModeUpdate:
+      case EventType.ModeUpdate:
         if (ev.mode_update_payload !== null) {
           this.config.mode = ev.mode_update_payload!.current_mode;
           this.config.sessionName = ev.mode_update_payload!.session_name;
@@ -134,7 +135,7 @@ function replaceColors(input: string): string {
 
 registerPlugin(new StatusBar());
 
-function inputModeStringValue(mode: input_mode.InputMode): string {
+function inputModeStringValue(mode: InputMode): string {
   switch (mode) {
     case 0:
       return "N";

@@ -1,10 +1,11 @@
 import { JSON } from "json-as/assembly";
 import { debug, readLine } from "./log";
-import { event, action } from "./proto/event";
+import { Event } from "./proto/event";
+import { NameAndValue, PluginConfiguration } from "./proto/action";
 
 export interface ZellijPlugin {
   load(configuration: Map<string, string>): void;
-  update(ev: event.Event): bool;
+  update(ev: Event): bool;
   render(rows: i32, cols: i32): void;
 }
 
@@ -15,11 +16,11 @@ export function registerPlugin(p: ZellijPlugin): void {
 }
 
 export function load(): void {
-  const configuration = action.PluginConfiguration.decode(readBytesFromStdIn());
+  const configuration = PluginConfiguration.decode(readBytesFromStdIn());
   const configurationMap = configuration.name_and_value.reduce(
     (
       map: Map<string, string>,
-      entry: action.NameAndValue,
+      entry: NameAndValue,
     ): Map<string, string> => map.set(entry.name, entry.value),
     new Map<string, string>(),
   );
@@ -30,7 +31,7 @@ export function load(): void {
 }
 
 export function update(): bool {
-  const ev = event.Event.decode(readBytesFromStdIn());
+  const ev = Event.decode(readBytesFromStdIn());
   if (STATE !== null) {
     return STATE!.update(ev);
   } else {

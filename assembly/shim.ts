@@ -1,12 +1,13 @@
 import { hostRunPluginCommand } from "./zellij";
 import { write } from "./log";
-import { event } from "./proto/event";
-import { plugin_command, plugin_permission } from "./proto/plugin_command";
 import { JSON } from "json-as/assembly";
+import { EventType } from "./proto/event";
+import { CommandName, PluginCommand } from "./proto/plugin_command";
+import { PermissionType } from "./proto/plugin_permission";
 
-export function subscribe(eventTypes: Array<event.EventType>): void {
-  const payload: plugin_command.PluginCommand = {
-    name: plugin_command.CommandName.Subscribe,
+export function subscribe(eventTypes: Array<EventType>): void {
+  const payload: PluginCommand = {
+    name: CommandName.Subscribe,
     subscribe_payload: {
       subscriptions: {
         event_types: eventTypes.map((ev: i32) => u32(ev)),
@@ -21,9 +22,9 @@ export function subscribe(eventTypes: Array<event.EventType>): void {
   hostRunPluginCommand();
 }
 
-export function unsubscribe(eventTypes: Array<event.EventType>): void {
-  const payload: plugin_command.PluginCommand = {
-    name: plugin_command.CommandName.Unsubscribe,
+export function unsubscribe(eventTypes: Array<EventType>): void {
+  const payload: PluginCommand = {
+    name: CommandName.Unsubscribe,
     unsubscribe_payload: {
       subscriptions: {
         event_types: eventTypes.map((ev: i32) => u32(ev)),
@@ -39,8 +40,8 @@ export function unsubscribe(eventTypes: Array<event.EventType>): void {
 }
 
 export function setSelectable(selectable: bool): void {
-  const payload: plugin_command.PluginCommand = {
-    name: plugin_command.CommandName.SetSelectable,
+  const payload: PluginCommand = {
+    name: CommandName.SetSelectable,
     set_selectable_payload: selectable,
   };
 
@@ -51,11 +52,9 @@ export function setSelectable(selectable: bool): void {
   hostRunPluginCommand();
 }
 
-export function requestPermission(
-  permissions: Array<plugin_permission.PermissionType>,
-): void {
-  const payload: plugin_command.PluginCommand = {
-    name: plugin_command.CommandName.RequestPluginPermissions,
+export function requestPermission(permissions: Array<PermissionType>): void {
+  const payload: PluginCommand = {
+    name: CommandName.RequestPluginPermissions,
     request_plugin_permission_payload: {
       permissions: permissions.map((ev: i32) => u32(ev)),
     },
