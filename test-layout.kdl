@@ -1,6 +1,21 @@
 layout {
-  pane
+  pane split_direction="vertical" {
+    pane
+  }
+
   pane size=1 borderless=true {
-    plugin location="file:build/debug.wasm"
+    plugin location="file:build/debug.wasm" {
+      //left ".bgBlue.black( {session_name}  ).blue() {tabs}"
+      //tab_normal ".bgBlue.black( {position}  {name} ).blue()"
+      //tab_active ".bgBlue.black.italic( {position}  {name} ).blue()"
+      // background: #2F343F
+      // normal section background: #3C4251
+      // normal section foreground: #323843
+      // active section background: #454C5C
+      // active section foreground: #FFFFFF
+      left "${fg=#FFFFFF,bg=#454C5C}( {mode}  {session_name} )${fg=#454C5C,bg=#2F343F}() {tabs}"
+      tab_normal "${fg=#2F343F,bg=#3C4251}()${fg=#323843,bg=#3C4251}( {position}  {name} )${fg=#3C4251,bg=#2F343F}()"
+      tab_active "${fg=#2F343F,bg=#454C5C}()${fg=#FFFFFF,bg=#454C5C}( {position}  {name} )${fg=#454C5C,bg=#2F343F}()"
+    }
   }
 }

@@ -1,472 +1,5 @@
-namespace __proto {
-  /**
-   * Decoder implements protobuf message decode interface.
-   *
-   * Useful references:
-   *
-   * Protocol Buffer encoding: https://developers.google.com/protocol-buffers/docs/encoding
-   * LEB128 encoding AKA varint 128 encoding: https://en.wikipedia.org/wiki/LEB128
-   * ZigZag encoding/decoding (s32/s64): https://gist.github.com/mfuerstenau/ba870a29e16536fdbaba
-   */
-  export class Decoder {
-    public view: DataView;
-    public pos: i32;
+import { Encoder, Decoder, Sizer } from "./Encoding";
 
-    constructor(view: DataView) {
-      this.view = view;
-      this.pos = 0;
-    }
-
-    /**
-     * Returns true if current reader has reached the buffer end
-     * @returns True if current reader has reached the buffer end
-     */
-    @inline
-    eof(): bool {
-      return this.pos >= this.view.byteLength;
-    }
-
-    /**
-     * Returns current buffer length in bytes
-     * @returns Length in bytes
-     */
-    @inline
-    get byteLength(): i32 {
-      return this.view.byteLength;
-    }
-
-    /**
-     * An alias method to fetch tag from the reader. Supposed to return tuple of [field number, wire_type].
-     * TODO: Replace with return tuple when tuples become implemented in AS.
-     * @returns Message tag value
-     */
-    @inline
-    tag(): u32 {
-      return this.uint32();
-    }
-
-    /**
-     * Returns byte at offset, alias for getUint8
-     * @param byteOffset Offset
-     * @returns u8
-     */
-    @inline
-    private u8at(byteOffset: i32): u8 {
-      return this.view.getUint8(byteOffset);
-    }
-
-    /**
-     * Reads and returns varint number (128 + 10 bits max) from a current position.
-     * @returns Returns varint
-     */
-    varint(): u64 {
-      let value: u64;
-
-      // u32
-      value = (u64(u8(this.u8at(this.pos))) & 127) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 7)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 14)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 21)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      // u32 remainder or u64 byte
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 28)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      // u64
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 35)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value =
-        (value | ((u64(u8(this.u8at(this.pos))) & 127) << 42)) /* 42!!! */ >>>
-        0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 49)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 28)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-      // u64 remainder
-      value = (value | ((u64(u8(this.u8at(this.pos))) & 127) << 35)) >>> 0;
-      if (u8(this.u8at(this.pos++)) < 128) return value;
-
-      if (this.pos > this.byteLength) {
-        this.throwOutOfRange();
-      }
-
-      return value;
-    }
-
-    @inline
-    int32(): i32 {
-      return i32(this.varint());
-    }
-
-    @inline
-    int64(): i64 {
-      return i32(this.varint());
-    }
-
-    @inline
-    uint32(): u32 {
-      return u32(this.varint());
-    }
-
-    @inline
-    uint64(): u64 {
-      return u64(this.varint());
-    }
-
-    @inline
-    sint32(): i32 {
-      const n: u64 = this.varint();
-      return i32((n >>> 1) ^ -(n & 1));
-    }
-
-    @inline
-    sint64(): i64 {
-      const n: u64 = this.varint();
-      return i64((n >>> 1) ^ -(n & 1));
-    }
-
-    fixed32(): u32 {
-      this.pos += 4;
-      if (this.pos > this.byteLength) {
-        this.throwOutOfRange();
-      }
-
-      // u32(u8) ensures that u8(-1) becomes u32(4294967295) instead of u8(255)
-      return (
-        u32(u8(this.u8at(this.pos - 4))) |
-        (u32(u8(this.u8at(this.pos - 3))) << 8) |
-        (u32(u8(this.u8at(this.pos - 2))) << 16) |
-        (u32(u8(this.u8at(this.pos - 1))) << 24)
-      );
-    }
-
-    @inline
-    sfixed32(): i32 {
-      return i32(this.fixed32());
-    }
-
-    fixed64(): u64 {
-      this.pos += 8;
-      if (this.pos > this.byteLength) {
-        this.throwOutOfRange();
-      }
-
-      return (
-        u64(u8(this.u8at(this.pos - 8))) |
-        (u64(u8(this.u8at(this.pos - 7))) << 8) |
-        (u64(u8(this.u8at(this.pos - 6))) << 16) |
-        (u64(u8(this.u8at(this.pos - 5))) << 24) |
-        (u64(u8(this.u8at(this.pos - 4))) << 32) |
-        (u64(u8(this.u8at(this.pos - 3))) << 40) |
-        (u64(u8(this.u8at(this.pos - 2))) << 48) |
-        (u64(u8(this.u8at(this.pos - 1))) << 56)
-      );
-    }
-
-    @inline
-    sfixed64(): i64 {
-      return i64(this.fixed64());
-    }
-
-    @inline
-    float(): f32 {
-      return f32.reinterpret_i32(this.fixed32());
-    }
-
-    @inline
-    double(): f64 {
-      return f64.reinterpret_i64(this.fixed64());
-    }
-
-    @inline
-    bool(): boolean {
-      return this.uint32() > 0;
-    }
-
-    /**
-     * Reads and returns UTF8 string.
-     * @returns String
-     */
-    string(): string {
-      const length = this.uint32();
-      if (this.pos + length > this.byteLength) {
-        this.throwOutOfRange();
-      }
-
-      const p = this.pos + this.view.byteOffset;
-      const value = String.UTF8.decode(this.view.buffer.slice(p, p + length));
-      this.pos += length;
-      return value;
-    }
-
-    /**
-     * Reads and returns bytes array.
-     * @returns Array<u8> of bytes
-     */
-    bytes(): Array<u8> {
-      const len = this.uint32();
-      if (this.pos + len > this.byteLength) {
-        this.throwOutOfRange();
-      }
-
-      const a = new Array<u8>(len);
-      for (let i: u32 = 0; i < len; i++) {
-        a[i] = u8(this.u8at(this.pos++));
-      }
-
-      return a;
-    }
-
-    /**
-     * Skips a message field if it can'be recognized by an object's decode() method
-     * @param wireType Current wire type
-     */
-    skipType(wireType: u32): void {
-      switch (wireType) {
-        // int32, int64, uint32, uint64, sint32, sint64, bool, enum: varint, variable length
-        case 0:
-          this.varint(); // Just read a varint
-          break;
-        // fixed64, sfixed64, double: 8 bytes always
-        case 1:
-          this.skip(8);
-          break;
-        // length-delimited; length is determined by varint32; skip length bytes;
-        case 2:
-          this.skip(this.uint32());
-          break;
-        // tart group: skip till the end of the group, then skip group end marker
-        case 3:
-          while ((wireType = this.uint32() & 7) !== 4) {
-            this.skipType(wireType);
-          }
-          break;
-        // fixed32, sfixed32, float: 4 bytes always
-        case 5:
-          this.skip(4);
-          break;
-
-        // Something went beyond our capability to understand
-        default:
-          throw new Error(
-            `Invalid wire type ${wireType} at offset ${this.pos}`,
-          );
-      }
-    }
-
-    /**
-     * Fast-forwards cursor by length with boundary check
-     * @param length Byte length
-     */
-    skip(length: u32): void {
-      if (this.pos + length > this.byteLength) {
-        this.throwOutOfRange();
-      }
-      this.pos += length;
-    }
-
-    /**
-     * OutOfRange check. Throws an exception if current position exceeds current buffer range
-     */
-    @inline
-    private throwOutOfRange(): void {
-      throw new Error(`Decoder position ${this.pos} is out of range!`);
-    }
-  }
-
-  /**
-   * Encoder implements protobuf message encode interface. This is the simplest not very effective version, which uses
-   * Array<u8>.
-   *
-   * Useful references:
-   *
-   * Protocol Buffer encoding: https://developers.google.com/protocol-buffers/docs/encoding
-   * LEB128 encoding AKA varint 128 encoding: https://en.wikipedia.org/wiki/LEB128
-   * ZigZag encoding/decoding (s32/s64): https://gist.github.com/mfuerstenau/ba870a29e16536fdbaba
-   */
-  export class Encoder {
-    public buf: Array<u8>;
-
-    constructor(buf: Array<u8>) {
-      this.buf = buf;
-    }
-
-    /**
-     * Encodes varint at a current position
-     * @returns Returns varint
-     */
-    varint64(value: u64): void {
-      let v: u64 = value;
-
-      while (v > 127) {
-        this.buf.push(u8((v & 127) | 128));
-        v = v >> 7;
-      }
-
-      this.buf.push(u8(v));
-    }
-
-    @inline
-    int32(value: i32): void {
-      this.varint64(value);
-    }
-
-    @inline
-    int64(value: i64): void {
-      this.varint64(value);
-    }
-
-    @inline
-    uint32(value: u32): void {
-      this.varint64(value);
-    }
-
-    @inline
-    uint64(value: u64): void {
-      this.varint64(value);
-    }
-
-    @inline
-    sint32(value: i32): void {
-      this.varint64((value << 1) ^ (value >> 31));
-    }
-
-    @inline
-    sint64(value: i64): void {
-      this.varint64((value << 1) ^ (value >> 63));
-    }
-
-    @inline
-    fixed32(value: u32): void {
-      this.buf.push(u8(value & 255));
-      this.buf.push(u8((value >> 8) & 255));
-      this.buf.push(u8((value >> 16) & 255));
-      this.buf.push(u8(value >> 24));
-    }
-
-    @inline
-    sfixed32(value: i32): void {
-      this.fixed32(u32(value));
-    }
-
-    @inline
-    fixed64(value: u64): void {
-      this.buf.push(u8(value & 255));
-      this.buf.push(u8((value >> 8) & 255));
-      this.buf.push(u8((value >> 16) & 255));
-      this.buf.push(u8((value >> 24) & 255));
-      this.buf.push(u8((value >> 32) & 255));
-      this.buf.push(u8((value >> 40) & 255));
-      this.buf.push(u8((value >> 48) & 255));
-      this.buf.push(u8(value >> 56));
-    }
-
-    @inline
-    sfixed64(value: i64): void {
-      this.fixed64(u64(value));
-    }
-
-    @inline
-    float(value: f32): void {
-      this.fixed32(u32(i32.reinterpret_f32(value)));
-    }
-
-    @inline
-    double(value: f64): void {
-      this.fixed64(u64(i64.reinterpret_f64(value)));
-    }
-
-    @inline
-    bool(value: boolean): void {
-      this.buf.push(value ? 1 : 0);
-    }
-
-    string(value: string): void {
-      const utf8string = new DataView(String.UTF8.encode(value));
-
-      for (let i = 0; i < utf8string.byteLength; i++) {
-        this.buf.push(utf8string.getUint8(i));
-      }
-    }
-
-    @inline
-    bytes(value: Array<u8>): void {
-      for (let i = 0; i < value.length; i++) {
-        this.buf.push(value[i]);
-      }
-    }
-  }
-
-  /**
-   * Returns byte size required to encode a value of a certain type
-   */
-  export class Sizer {
-    static varint64(value: u64): u32 {
-      return value < 128
-        ? 1 // 2^7
-        : value < 16384
-          ? 2 // 2^14
-          : value < 2097152
-            ? 3 // 2^21
-            : value < 268435456
-              ? 4 // 2^28
-              : value < 34359738368
-                ? 5 // 2^35
-                : value < 4398046511104
-                  ? 6 // 2^42
-                  : value < 562949953421312
-                    ? 7 // 2^49
-                    : value < 72057594037927936
-                      ? 8 // 2^56
-                      : value < 9223372036854775808
-                        ? 9 // 2^63
-                        : 10;
-    }
-
-    @inline
-    static int32(value: i32): u32 {
-      return Sizer.varint64(u64(value));
-    }
-
-    @inline
-    static int64(value: i64): u32 {
-      return Sizer.varint64(u64(value));
-    }
-
-    @inline
-    static uint32(value: u32): u32 {
-      return Sizer.varint64(value);
-    }
-
-    @inline
-    static uint64(value: u64): u32 {
-      return Sizer.varint64(value);
-    }
-
-    @inline
-    static sint32(value: i32): u32 {
-      return Sizer.varint64((value << 1) ^ (value >> 31));
-    }
-
-    @inline
-    static sint64(value: i64): u32 {
-      return Sizer.varint64((value << 1) ^ (value >> 63));
-    }
-
-    @inline
-    static string(value: string): u32 {
-      return value.length;
-    }
-
-    @inline
-    static bytes(value: Array<u8>): u32 {
-      return value.length;
-    }
-  }
-}
 export namespace input_mode {
   export enum InputMode {
     /**
@@ -532,7 +65,7 @@ export namespace resize {
 
     // Decodes Resize from a DataView
     static decodeDataView(view: DataView): Resize {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new Resize();
 
       while (!decoder.eof()) {
@@ -563,11 +96,8 @@ export namespace resize {
       let size: u32 = 0;
 
       size +=
-        this.resize_action == 0
-          ? 0
-          : 1 + __proto.Sizer.uint32(this.resize_action);
-      size +=
-        this.direction == 0 ? 0 : 1 + __proto.Sizer.uint32(this.direction);
+        this.resize_action == 0 ? 0 : 1 + Sizer.uint32(this.resize_action);
+      size += this.direction == 0 ? 0 : 1 + Sizer.uint32(this.direction);
 
       return size;
     }
@@ -580,9 +110,7 @@ export namespace resize {
     }
 
     // Encodes Resize to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.resize_action != 0) {
@@ -608,7 +136,7 @@ export namespace resize {
 
     // Decodes MoveDirection from a DataView
     static decodeDataView(view: DataView): MoveDirection {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new MoveDirection();
 
       while (!decoder.eof()) {
@@ -632,8 +160,7 @@ export namespace resize {
     public size(): u32 {
       let size: u32 = 0;
 
-      size +=
-        this.direction == 0 ? 0 : 1 + __proto.Sizer.uint32(this.direction);
+      size += this.direction == 0 ? 0 : 1 + Sizer.uint32(this.direction);
 
       return size;
     }
@@ -646,9 +173,7 @@ export namespace resize {
     }
 
     // Encodes MoveDirection to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.direction != 0) {
@@ -672,7 +197,7 @@ export namespace action {
 
     // Decodes PaneIdAndShouldFloat from a DataView
     static decodeDataView(view: DataView): PaneIdAndShouldFloat {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new PaneIdAndShouldFloat();
 
       while (!decoder.eof()) {
@@ -700,7 +225,7 @@ export namespace action {
     public size(): u32 {
       let size: u32 = 0;
 
-      size += this.pane_id == 0 ? 0 : 1 + __proto.Sizer.uint32(this.pane_id);
+      size += this.pane_id == 0 ? 0 : 1 + Sizer.uint32(this.pane_id);
       size += this.should_float == 0 ? 0 : 1 + 1;
 
       return size;
@@ -714,9 +239,7 @@ export namespace action {
     }
 
     // Encodes PaneIdAndShouldFloat to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.pane_id != 0) {
@@ -742,7 +265,7 @@ export namespace action {
 
     // Decodes SwitchToModePayload from a DataView
     static decodeDataView(view: DataView): SwitchToModePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new SwitchToModePayload();
 
       while (!decoder.eof()) {
@@ -766,8 +289,7 @@ export namespace action {
     public size(): u32 {
       let size: u32 = 0;
 
-      size +=
-        this.input_mode == 0 ? 0 : 1 + __proto.Sizer.uint32(this.input_mode);
+      size += this.input_mode == 0 ? 0 : 1 + Sizer.uint32(this.input_mode);
 
       return size;
     }
@@ -780,9 +302,7 @@ export namespace action {
     }
 
     // Encodes SwitchToModePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.input_mode != 0) {
@@ -841,7 +361,7 @@ export namespace event {
 
     // Decodes EventNameList from a DataView
     static decodeDataView(view: DataView): EventNameList {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new EventNameList();
 
       while (!decoder.eof()) {
@@ -872,7 +392,7 @@ export namespace event {
       if (this.event_types.length > 0) {
         const packedSize = __size_uint32_repeated_packed(this.event_types);
         if (packedSize > 0) {
-          size += 1 + __proto.Sizer.varint64(packedSize) + packedSize;
+          size += 1 + Sizer.varint64(packedSize) + packedSize;
         }
       }
 
@@ -887,9 +407,7 @@ export namespace event {
     }
 
     // Encodes EventNameList to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.event_types.length > 0) {
@@ -916,7 +434,7 @@ export namespace event {
 
     // Decodes Header from a DataView
     static decodeDataView(view: DataView): Header {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new Header();
 
       while (!decoder.eof()) {
@@ -946,11 +464,11 @@ export namespace event {
 
       size +=
         this.name.length > 0
-          ? 1 + __proto.Sizer.varint64(this.name.length) + this.name.length
+          ? 1 + Sizer.varint64(this.name.length) + this.name.length
           : 0;
       size +=
         this.value.length > 0
-          ? 1 + __proto.Sizer.varint64(this.value.length) + this.value.length
+          ? 1 + Sizer.varint64(this.value.length) + this.value.length
           : 0;
 
       return size;
@@ -964,9 +482,7 @@ export namespace event {
     }
 
     // Encodes Header to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name.length > 0) {
@@ -1006,7 +522,7 @@ export namespace file {
 
     // Decodes File from a DataView
     static decodeDataView(view: DataView): File {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new File();
 
       while (!decoder.eof()) {
@@ -1044,13 +560,12 @@ export namespace file {
 
       size +=
         this.path.length > 0
-          ? 1 + __proto.Sizer.varint64(this.path.length) + this.path.length
+          ? 1 + Sizer.varint64(this.path.length) + this.path.length
           : 0;
-      size +=
-        this.line_number == 0 ? 0 : 1 + __proto.Sizer.int32(this.line_number);
+      size += this.line_number == 0 ? 0 : 1 + Sizer.int32(this.line_number);
       size +=
         this.cwd.length > 0
-          ? 1 + __proto.Sizer.varint64(this.cwd.length) + this.cwd.length
+          ? 1 + Sizer.varint64(this.cwd.length) + this.cwd.length
           : 0;
 
       return size;
@@ -1064,9 +579,7 @@ export namespace file {
     }
 
     // Encodes File to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.path.length > 0) {
@@ -1106,7 +619,7 @@ export namespace command {
 
     // Decodes Command from a DataView
     static decodeDataView(view: DataView): Command {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new Command();
 
       while (!decoder.eof()) {
@@ -1142,14 +655,14 @@ export namespace command {
 
       size +=
         this.path.length > 0
-          ? 1 + __proto.Sizer.varint64(this.path.length) + this.path.length
+          ? 1 + Sizer.varint64(this.path.length) + this.path.length
           : 0;
 
       size += __size_string_repeated(this.args);
 
       size +=
         this.cwd.length > 0
-          ? 1 + __proto.Sizer.varint64(this.cwd.length) + this.cwd.length
+          ? 1 + Sizer.varint64(this.cwd.length) + this.cwd.length
           : 0;
 
       return size;
@@ -1163,9 +676,7 @@ export namespace command {
     }
 
     // Encodes Command to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.path.length > 0) {
@@ -1210,7 +721,7 @@ export namespace message {
 
     // Decodes Message from a DataView
     static decodeDataView(view: DataView): Message {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new Message();
 
       while (!decoder.eof()) {
@@ -1246,18 +757,16 @@ export namespace message {
 
       size +=
         this.name.length > 0
-          ? 1 + __proto.Sizer.varint64(this.name.length) + this.name.length
+          ? 1 + Sizer.varint64(this.name.length) + this.name.length
           : 0;
       size +=
         this.payload.length > 0
-          ? 1 +
-            __proto.Sizer.varint64(this.payload.length) +
-            this.payload.length
+          ? 1 + Sizer.varint64(this.payload.length) + this.payload.length
           : 0;
       size +=
         this.worker_name.length > 0
           ? 1 +
-            __proto.Sizer.varint64(this.worker_name.length) +
+            Sizer.varint64(this.worker_name.length) +
             this.worker_name.length
           : 0;
 
@@ -1272,9 +781,7 @@ export namespace message {
     }
 
     // Encodes Message to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name.length > 0) {
@@ -1515,7 +1022,7 @@ export namespace plugin_command {
 
     // Decodes PluginCommand from a DataView
     static decodeDataView(view: DataView): PluginCommand {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new PluginCommand();
 
       while (!decoder.eof()) {
@@ -2139,14 +1646,14 @@ export namespace plugin_command {
     public size(): u32 {
       let size: u32 = 0;
 
-      size += this.name == 0 ? 0 : 1 + __proto.Sizer.uint32(this.name);
+      size += this.name == 0 ? 0 : 1 + Sizer.uint32(this.name);
 
       if (this.subscribe_payload != null) {
         const f: SubscribePayload = this.subscribe_payload as SubscribePayload;
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2156,7 +1663,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2167,7 +1674,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2177,7 +1684,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2187,7 +1694,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2197,7 +1704,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2207,7 +1714,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2217,7 +1724,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2227,7 +1734,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2237,7 +1744,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2246,7 +1753,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2256,7 +1763,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2266,7 +1773,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2278,14 +1785,14 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.new_tabs_with_layout_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.new_tabs_with_layout_payload.length) +
+            Sizer.varint64(this.new_tabs_with_layout_payload.length) +
             this.new_tabs_with_layout_payload.length
           : 0;
 
@@ -2294,7 +1801,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2304,7 +1811,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2313,7 +1820,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2322,20 +1829,20 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.write_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.write_payload.length) +
+            Sizer.varint64(this.write_payload.length) +
             this.write_payload.length
           : 0;
       size +=
         this.write_chars_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.write_chars_payload.length) +
+            Sizer.varint64(this.write_chars_payload.length) +
             this.write_chars_payload.length
           : 0;
 
@@ -2345,40 +1852,40 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.go_to_tab_name_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.go_to_tab_name_payload.length) +
+            Sizer.varint64(this.go_to_tab_name_payload.length) +
             this.go_to_tab_name_payload.length
           : 0;
       size +=
         this.focus_or_create_tab_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.focus_or_create_tab_payload.length) +
+            Sizer.varint64(this.focus_or_create_tab_payload.length) +
             this.focus_or_create_tab_payload.length
           : 0;
       size +=
         this.go_to_tab_payload == 0
           ? 0
-          : 2 + __proto.Sizer.uint32(this.go_to_tab_payload);
+          : 2 + Sizer.uint32(this.go_to_tab_payload);
       size +=
         this.start_or_reload_plugin_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.start_or_reload_plugin_payload.length) +
+            Sizer.varint64(this.start_or_reload_plugin_payload.length) +
             this.start_or_reload_plugin_payload.length
           : 0;
       size +=
         this.close_terminal_pane_payload == 0
           ? 0
-          : 2 + __proto.Sizer.uint32(this.close_terminal_pane_payload);
+          : 2 + Sizer.uint32(this.close_terminal_pane_payload);
       size +=
         this.close_plugin_pane_payload == 0
           ? 0
-          : 2 + __proto.Sizer.uint32(this.close_plugin_pane_payload);
+          : 2 + Sizer.uint32(this.close_plugin_pane_payload);
 
       if (this.focus_terminal_pane_payload != null) {
         const f: action.PaneIdAndShouldFloat = this
@@ -2386,7 +1893,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2396,7 +1903,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2406,7 +1913,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2415,7 +1922,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2424,14 +1931,14 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.report_crash_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.report_crash_payload.length) +
+            Sizer.varint64(this.report_crash_payload.length) +
             this.report_crash_payload.length
           : 0;
 
@@ -2441,7 +1948,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2451,7 +1958,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2461,7 +1968,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2471,7 +1978,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2481,7 +1988,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2491,7 +1998,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2501,32 +2008,32 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.delete_dead_session_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.delete_dead_session_payload.length) +
+            Sizer.varint64(this.delete_dead_session_payload.length) +
             this.delete_dead_session_payload.length
           : 0;
       size +=
         this.rename_session_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.rename_session_payload.length) +
+            Sizer.varint64(this.rename_session_payload.length) +
             this.rename_session_payload.length
           : 0;
       size +=
         this.unblock_cli_pipe_input_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.unblock_cli_pipe_input_payload.length) +
+            Sizer.varint64(this.unblock_cli_pipe_input_payload.length) +
             this.unblock_cli_pipe_input_payload.length
           : 0;
       size +=
         this.block_cli_pipe_input_payload.length > 0
           ? 2 +
-            __proto.Sizer.varint64(this.block_cli_pipe_input_payload.length) +
+            Sizer.varint64(this.block_cli_pipe_input_payload.length) +
             this.block_cli_pipe_input_payload.length
           : 0;
 
@@ -2536,7 +2043,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2546,7 +2053,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 2 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 2 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -2561,9 +2068,7 @@ export namespace plugin_command {
     }
 
     // Encodes PluginCommand to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name != 0) {
@@ -3068,7 +2573,7 @@ export namespace plugin_command {
 
     // Decodes CliPipeOutputPayload from a DataView
     static decodeDataView(view: DataView): CliPipeOutputPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new CliPipeOutputPayload();
 
       while (!decoder.eof()) {
@@ -3098,13 +2603,11 @@ export namespace plugin_command {
 
       size +=
         this.pipe_name.length > 0
-          ? 1 +
-            __proto.Sizer.varint64(this.pipe_name.length) +
-            this.pipe_name.length
+          ? 1 + Sizer.varint64(this.pipe_name.length) + this.pipe_name.length
           : 0;
       size +=
         this.output.length > 0
-          ? 1 + __proto.Sizer.varint64(this.output.length) + this.output.length
+          ? 1 + Sizer.varint64(this.output.length) + this.output.length
           : 0;
 
       return size;
@@ -3118,9 +2621,7 @@ export namespace plugin_command {
     }
 
     // Encodes CliPipeOutputPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.pipe_name.length > 0) {
@@ -3166,7 +2667,7 @@ export namespace plugin_command {
 
     // Decodes MessageToPluginPayload from a DataView
     static decodeDataView(view: DataView): MessageToPluginPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new MessageToPluginPayload();
 
       while (!decoder.eof()) {
@@ -3249,29 +2750,27 @@ export namespace plugin_command {
 
       size +=
         this.plugin_url.length > 0
-          ? 1 +
-            __proto.Sizer.varint64(this.plugin_url.length) +
-            this.plugin_url.length
+          ? 1 + Sizer.varint64(this.plugin_url.length) + this.plugin_url.length
           : 0;
 
       for (let n: i32 = 0; n < this.plugin_config.length; n++) {
         const messageSize = this.plugin_config[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.message_name.length > 0
           ? 1 +
-            __proto.Sizer.varint64(this.message_name.length) +
+            Sizer.varint64(this.message_name.length) +
             this.message_name.length
           : 0;
       size +=
         this.message_payload.length > 0
           ? 1 +
-            __proto.Sizer.varint64(this.message_payload.length) +
+            Sizer.varint64(this.message_payload.length) +
             this.message_payload.length
           : 0;
 
@@ -3279,7 +2778,7 @@ export namespace plugin_command {
         const messageSize = this.message_args[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -3288,7 +2787,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -3303,9 +2802,7 @@ export namespace plugin_command {
     }
 
     // Encodes MessageToPluginPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.plugin_url.length > 0) {
@@ -3392,7 +2889,7 @@ export namespace plugin_command {
 
     // Decodes NewPluginArgs from a DataView
     static decodeDataView(view: DataView): NewPluginArgs {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new NewPluginArgs();
 
       while (!decoder.eof()) {
@@ -3456,19 +2953,17 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.pane_title.length > 0
-          ? 1 +
-            __proto.Sizer.varint64(this.pane_title.length) +
-            this.pane_title.length
+          ? 1 + Sizer.varint64(this.pane_title.length) + this.pane_title.length
           : 0;
       size +=
         this.cwd.length > 0
-          ? 1 + __proto.Sizer.varint64(this.cwd.length) + this.cwd.length
+          ? 1 + Sizer.varint64(this.cwd.length) + this.cwd.length
           : 0;
       size += this.skip_cache == 0 ? 0 : 1 + 1;
 
@@ -3483,9 +2978,7 @@ export namespace plugin_command {
     }
 
     // Encodes NewPluginArgs to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.should_float != 0) {
@@ -3535,7 +3028,7 @@ export namespace plugin_command {
 
     // Decodes PaneId from a DataView
     static decodeDataView(view: DataView): PaneId {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new PaneId();
 
       while (!decoder.eof()) {
@@ -3563,9 +3056,8 @@ export namespace plugin_command {
     public size(): u32 {
       let size: u32 = 0;
 
-      size +=
-        this.pane_type == 0 ? 0 : 1 + __proto.Sizer.uint32(this.pane_type);
-      size += this.id == 0 ? 0 : 1 + __proto.Sizer.uint32(this.id);
+      size += this.pane_type == 0 ? 0 : 1 + Sizer.uint32(this.pane_type);
+      size += this.id == 0 ? 0 : 1 + Sizer.uint32(this.id);
 
       return size;
     }
@@ -3578,9 +3070,7 @@ export namespace plugin_command {
     }
 
     // Encodes PaneId to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.pane_type != 0) {
@@ -3626,7 +3116,7 @@ export namespace plugin_command {
 
     // Decodes SwitchSessionPayload from a DataView
     static decodeDataView(view: DataView): SwitchSessionPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new SwitchSessionPayload();
 
       while (!decoder.eof()) {
@@ -3672,13 +3162,10 @@ export namespace plugin_command {
 
       size +=
         this.name.length > 0
-          ? 1 + __proto.Sizer.varint64(this.name.length) + this.name.length
+          ? 1 + Sizer.varint64(this.name.length) + this.name.length
           : 0;
-      size +=
-        this.tab_position == 0
-          ? 0
-          : 1 + __proto.Sizer.uint32(this.tab_position);
-      size += this.pane_id == 0 ? 0 : 1 + __proto.Sizer.uint32(this.pane_id);
+      size += this.tab_position == 0 ? 0 : 1 + Sizer.uint32(this.tab_position);
+      size += this.pane_id == 0 ? 0 : 1 + Sizer.uint32(this.pane_id);
       size += this.pane_id_is_plugin == 0 ? 0 : 1 + 1;
 
       return size;
@@ -3692,9 +3179,7 @@ export namespace plugin_command {
     }
 
     // Encodes SwitchSessionPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name.length > 0) {
@@ -3729,7 +3214,7 @@ export namespace plugin_command {
 
     // Decodes RequestPluginPermissionPayload from a DataView
     static decodeDataView(view: DataView): RequestPluginPermissionPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new RequestPluginPermissionPayload();
 
       while (!decoder.eof()) {
@@ -3760,7 +3245,7 @@ export namespace plugin_command {
       if (this.permissions.length > 0) {
         const packedSize = __size_uint32_repeated_packed(this.permissions);
         if (packedSize > 0) {
-          size += 1 + __proto.Sizer.varint64(packedSize) + packedSize;
+          size += 1 + Sizer.varint64(packedSize) + packedSize;
         }
       }
 
@@ -3775,9 +3260,7 @@ export namespace plugin_command {
     }
 
     // Encodes RequestPluginPermissionPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.permissions.length > 0) {
@@ -3803,7 +3286,7 @@ export namespace plugin_command {
 
     // Decodes SubscribePayload from a DataView
     static decodeDataView(view: DataView): SubscribePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new SubscribePayload();
 
       while (!decoder.eof()) {
@@ -3842,7 +3325,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -3857,9 +3340,7 @@ export namespace plugin_command {
     }
 
     // Encodes SubscribePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.subscriptions != null) {
@@ -3888,7 +3369,7 @@ export namespace plugin_command {
 
     // Decodes UnsubscribePayload from a DataView
     static decodeDataView(view: DataView): UnsubscribePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new UnsubscribePayload();
 
       while (!decoder.eof()) {
@@ -3927,7 +3408,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -3942,9 +3423,7 @@ export namespace plugin_command {
     }
 
     // Encodes UnsubscribePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.subscriptions != null) {
@@ -3973,7 +3452,7 @@ export namespace plugin_command {
 
     // Decodes OpenFilePayload from a DataView
     static decodeDataView(view: DataView): OpenFilePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new OpenFilePayload();
 
       while (!decoder.eof()) {
@@ -4011,7 +3490,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4026,9 +3505,7 @@ export namespace plugin_command {
     }
 
     // Encodes OpenFilePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.file_to_open != null) {
@@ -4057,7 +3534,7 @@ export namespace plugin_command {
 
     // Decodes OpenCommandPanePayload from a DataView
     static decodeDataView(view: DataView): OpenCommandPanePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new OpenCommandPanePayload();
 
       while (!decoder.eof()) {
@@ -4095,7 +3572,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4110,9 +3587,7 @@ export namespace plugin_command {
     }
 
     // Encodes OpenCommandPanePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.command_to_run != null) {
@@ -4141,7 +3616,7 @@ export namespace plugin_command {
 
     // Decodes SwitchTabToPayload from a DataView
     static decodeDataView(view: DataView): SwitchTabToPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new SwitchTabToPayload();
 
       while (!decoder.eof()) {
@@ -4165,8 +3640,7 @@ export namespace plugin_command {
     public size(): u32 {
       let size: u32 = 0;
 
-      size +=
-        this.tab_index == 0 ? 0 : 1 + __proto.Sizer.uint32(this.tab_index);
+      size += this.tab_index == 0 ? 0 : 1 + Sizer.uint32(this.tab_index);
 
       return size;
     }
@@ -4179,9 +3653,7 @@ export namespace plugin_command {
     }
 
     // Encodes SwitchTabToPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.tab_index != 0) {
@@ -4203,7 +3675,7 @@ export namespace plugin_command {
 
     // Decodes SetTimeoutPayload from a DataView
     static decodeDataView(view: DataView): SetTimeoutPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new SetTimeoutPayload();
 
       while (!decoder.eof()) {
@@ -4240,9 +3712,7 @@ export namespace plugin_command {
     }
 
     // Encodes SetTimeoutPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.seconds != 0) {
@@ -4264,7 +3734,7 @@ export namespace plugin_command {
 
     // Decodes ExecCmdPayload from a DataView
     static decodeDataView(view: DataView): ExecCmdPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new ExecCmdPayload();
 
       while (!decoder.eof()) {
@@ -4301,9 +3771,7 @@ export namespace plugin_command {
     }
 
     // Encodes ExecCmdPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.command_line.length > 0) {
@@ -4331,7 +3799,7 @@ export namespace plugin_command {
 
     // Decodes RunCommandPayload from a DataView
     static decodeDataView(view: DataView): RunCommandPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new RunCommandPayload();
 
       while (!decoder.eof()) {
@@ -4395,20 +3863,20 @@ export namespace plugin_command {
         const messageSize = this.env_variables[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.cwd.length > 0
-          ? 1 + __proto.Sizer.varint64(this.cwd.length) + this.cwd.length
+          ? 1 + Sizer.varint64(this.cwd.length) + this.cwd.length
           : 0;
 
       for (let n: i32 = 0; n < this.context.length; n++) {
         const messageSize = this.context[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4423,9 +3891,7 @@ export namespace plugin_command {
     }
 
     // Encodes RunCommandPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.command_line.length > 0) {
@@ -4480,7 +3946,7 @@ export namespace plugin_command {
 
     // Decodes WebRequestPayload from a DataView
     static decodeDataView(view: DataView): WebRequestPayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new WebRequestPayload();
 
       while (!decoder.eof()) {
@@ -4544,28 +4010,28 @@ export namespace plugin_command {
 
       size +=
         this.url.length > 0
-          ? 1 + __proto.Sizer.varint64(this.url.length) + this.url.length
+          ? 1 + Sizer.varint64(this.url.length) + this.url.length
           : 0;
-      size += this.verb == 0 ? 0 : 1 + __proto.Sizer.uint32(this.verb);
+      size += this.verb == 0 ? 0 : 1 + Sizer.uint32(this.verb);
 
       for (let n: i32 = 0; n < this.headers.length; n++) {
         const messageSize = this.headers[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
       size +=
         this.body.length > 0
-          ? 1 + __proto.Sizer.varint64(this.body.length) + this.body.length
+          ? 1 + Sizer.varint64(this.body.length) + this.body.length
           : 0;
 
       for (let n: i32 = 0; n < this.context.length; n++) {
         const messageSize = this.context[n].size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4580,9 +4046,7 @@ export namespace plugin_command {
     }
 
     // Encodes WebRequestPayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.url.length > 0) {
@@ -4636,7 +4100,7 @@ export namespace plugin_command {
 
     // Decodes EnvVariable from a DataView
     static decodeDataView(view: DataView): EnvVariable {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new EnvVariable();
 
       while (!decoder.eof()) {
@@ -4666,11 +4130,11 @@ export namespace plugin_command {
 
       size +=
         this.name.length > 0
-          ? 1 + __proto.Sizer.varint64(this.name.length) + this.name.length
+          ? 1 + Sizer.varint64(this.name.length) + this.name.length
           : 0;
       size +=
         this.value.length > 0
-          ? 1 + __proto.Sizer.varint64(this.value.length) + this.value.length
+          ? 1 + Sizer.varint64(this.value.length) + this.value.length
           : 0;
 
       return size;
@@ -4684,9 +4148,7 @@ export namespace plugin_command {
     }
 
     // Encodes EnvVariable to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name.length > 0) {
@@ -4715,7 +4177,7 @@ export namespace plugin_command {
 
     // Decodes ContextItem from a DataView
     static decodeDataView(view: DataView): ContextItem {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new ContextItem();
 
       while (!decoder.eof()) {
@@ -4745,11 +4207,11 @@ export namespace plugin_command {
 
       size +=
         this.name.length > 0
-          ? 1 + __proto.Sizer.varint64(this.name.length) + this.name.length
+          ? 1 + Sizer.varint64(this.name.length) + this.name.length
           : 0;
       size +=
         this.value.length > 0
-          ? 1 + __proto.Sizer.varint64(this.value.length) + this.value.length
+          ? 1 + Sizer.varint64(this.value.length) + this.value.length
           : 0;
 
       return size;
@@ -4763,9 +4225,7 @@ export namespace plugin_command {
     }
 
     // Encodes ContextItem to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.name.length > 0) {
@@ -4793,7 +4253,7 @@ export namespace plugin_command {
 
     // Decodes PluginMessagePayload from a DataView
     static decodeDataView(view: DataView): PluginMessagePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new PluginMessagePayload();
 
       while (!decoder.eof()) {
@@ -4831,7 +4291,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4846,9 +4306,7 @@ export namespace plugin_command {
     }
 
     // Encodes PluginMessagePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.message != null) {
@@ -4877,7 +4335,7 @@ export namespace plugin_command {
 
     // Decodes ResizePayload from a DataView
     static decodeDataView(view: DataView): ResizePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new ResizePayload();
 
       while (!decoder.eof()) {
@@ -4915,7 +4373,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -4930,9 +4388,7 @@ export namespace plugin_command {
     }
 
     // Encodes ResizePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.resize != null) {
@@ -4961,7 +4417,7 @@ export namespace plugin_command {
 
     // Decodes MovePayload from a DataView
     static decodeDataView(view: DataView): MovePayload {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new MovePayload();
 
       while (!decoder.eof()) {
@@ -4999,7 +4455,7 @@ export namespace plugin_command {
         const messageSize = f.size();
 
         if (messageSize > 0) {
-          size += 1 + __proto.Sizer.varint64(messageSize) + messageSize;
+          size += 1 + Sizer.varint64(messageSize) + messageSize;
         }
       }
 
@@ -5014,9 +4470,7 @@ export namespace plugin_command {
     }
 
     // Encodes MovePayload to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.direction != null) {
@@ -5047,7 +4501,7 @@ export namespace plugin_command {
 
     // Decodes IdAndNewName from a DataView
     static decodeDataView(view: DataView): IdAndNewName {
-      const decoder = new __proto.Decoder(view);
+      const decoder = new Decoder(view);
       const obj = new IdAndNewName();
 
       while (!decoder.eof()) {
@@ -5075,12 +4529,10 @@ export namespace plugin_command {
     public size(): u32 {
       let size: u32 = 0;
 
-      size += this.id == 0 ? 0 : 1 + __proto.Sizer.uint32(this.id);
+      size += this.id == 0 ? 0 : 1 + Sizer.uint32(this.id);
       size +=
         this.new_name.length > 0
-          ? 1 +
-            __proto.Sizer.varint64(this.new_name.length) +
-            this.new_name.length
+          ? 1 + Sizer.varint64(this.new_name.length) + this.new_name.length
           : 0;
 
       return size;
@@ -5094,9 +4546,7 @@ export namespace plugin_command {
     }
 
     // Encodes IdAndNewName to the Array<u8>
-    encodeU8Array(
-      encoder: __proto.Encoder = new __proto.Encoder(new Array<u8>()),
-    ): Array<u8> {
+    encodeU8Array(encoder: Encoder = new Encoder(new Array<u8>())): Array<u8> {
       const buf = encoder.buf;
 
       if (this.id != 0) {
@@ -5120,7 +4570,7 @@ function __size_uint32_repeated_packed(value: Array<u32>): u32 {
   let size: u32 = 0;
 
   for (let n: i32 = 0; n < value.length; n++) {
-    size += __proto.Sizer.uint32(value[n]);
+    size += Sizer.uint32(value[n]);
   }
 
   return size;
@@ -5132,7 +4582,7 @@ function __size_string_repeated(value: Array<string>): u32 {
   let size: u32 = 0;
 
   for (let n: i32 = 0; n < value.length; n++) {
-    size += 1 + __proto.Sizer.varint64(value[n].length) + value[n].length;
+    size += 1 + Sizer.varint64(value[n].length) + value[n].length;
   }
 
   return size;

@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npm run asbuild",
+    "build": "npm run build:debug",
+    "build:debug": "asc assembly/index.ts --target debug",
+    "build:release": "asc assembly/index.ts --target release",
     "run": "wasmtime build/index.wasm",
     "start": "zellij --debug -s plugin-dev --layout ./test-layout.kdl",
     "stop": "zellij delete-session --force plugin-dev",
@@ -20,9 +22,9 @@
   "devDependencies": {
     "@assemblyscript/wasi-shim": "^0.1.0",
     "assemblyscript": "^0.27.23",
+    "prettier": "^3.2.4",
     "typescript": "^5.3.3",
-    "visitor-as": "^0.11.4",
-    "prettier": "^3.2.4"
+    "visitor-as": "^0.11.4"
   },
   "type": "module",
   "exports": {
@@ -33,6 +35,7 @@
   },
   "dependencies": {
     "as-wasi": "^0.6.0",
+    "assemblyscript-regex": "^1.6.4",
     "json-as": "^0.7.2",
     "protobuf-as": "github:gravitational/protobuf-as"
   },

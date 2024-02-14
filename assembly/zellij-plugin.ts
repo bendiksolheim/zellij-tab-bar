@@ -1,7 +1,6 @@
 import { JSON } from "json-as/assembly";
-import { readLine } from "./log";
-import { event } from "./proto/event";
-import { Console, Descriptor } from "as-wasi/assembly";
+import { debug, readLine } from "./log";
+import { event, action } from "./proto/event";
 
 export interface ZellijPlugin {
   load(configuration: Map<string, string>): void;
@@ -16,16 +15,22 @@ export function registerPlugin(p: ZellijPlugin): void {
 }
 
 export function load(): void {
+  const configuration = action.PluginConfiguration.decode(readBytesFromStdIn());
+  const configurationMap = configuration.name_and_value.reduce(
+    (
+      map: Map<string, string>,
+      entry: action.NameAndValue,
+    ): Map<string, string> => map.set(entry.name, entry.value),
+    new Map<string, string>(),
+  );
+
   if (STATE !== null) {
-    STATE!.load(new Map());
+    STATE!.load(configurationMap);
   }
 }
 
 export function update(): bool {
-  const text = readLine();
-  const bytes = JSON.parse<u8[]>(text);
-  const a = changetype<ArrayBufferView>(bytes).buffer;
-  const ev: event.Event = event.Event.decode(a);
+  const ev = event.Event.decode(readBytesFromStdIn());
   if (STATE !== null) {
     return STATE!.update(ev);
   } else {
@@ -41,4 +46,12 @@ export function render(rows: i32, cols: i32): void {
 
 export function plugin_version(): void {
   console.log("0.39.2");
+}
+
+@inline function readBytesFromStdIn(): ArrayBuffer {
+  const line = readLine();
+  const bytes = JSON.parse<u8[]>(line);
+  const typedArray = new Uint8Array(bytes.length);
+  typedArray.set(bytes);
+  return typedArray.buffer;
 }
