@@ -1,12 +1,23 @@
 import { debug, write } from "./log";
-import { ZellijPlugin, registerPlugin } from "./zellij/zellij-plugin";
-export { load, render, update, plugin_version } from "./zellij/zellij-plugin";
-import { requestPermission, subscribe } from "./zellij/shim";
+import {
+  ZellijPlugin,
+  registerPlugin,
+  Event,
+  EventType,
+  TabInfo,
+  requestPermission,
+  subscribe,
+  InputMode,
+  PermissionType,
+} from "as-zellij/assembly";
+export {
+  load,
+  render,
+  update,
+  plugin_version,
+} from "as-zellij/assembly/wasi-exports";
 import { colors, hexBackground, hexForeground } from "./terminal/color";
 import { Match, RegExp } from "./regexp";
-import { InputMode } from "./zellij/proto/input_mode";
-import { Event, EventType, TabInfo } from "./zellij/proto/event";
-import { PermissionType } from "./zellij/proto/plugin_permission";
 
 class Tab {
   number: u32;
